@@ -1,16 +1,12 @@
-const express = require("express")
-const { Router } = require("express")
-const userRouter = Router()
-const { z } = require("zod")
-const bcrypt = require("bcrypt")
-const { UserModel } = require("../db")
-const { authmiddleware } = require("../middleware/user")
+import express from "express"
+import { z } from "zod"
+import bcrypt from "bcrypt"
+import { UserModel } from "../db.js"
+import { authmiddleware } from "../middleware/user.js"
+import { redisclient } from "../config.js"
+import { createAccessToken, createRefreshToken } from "../tokens/token.js"
 
-const crypto = require("crypto")
-const { redisclient } = require("../config")
-
-const app = express()
-app.use(express.json())
+const userRouter = express.Router()
 
 const userSchema = z.object({
     username: z.string().min(3).max(50),
@@ -50,11 +46,9 @@ userRouter.post("/signin", async (req,res)=>{
         if(user){
             const password_match = await bcrypt.compare(password, user.password)
             if(password_match){
-                const token = crypto.randomBytes(32).toString("hex")
-                await redisclient.set(`session:${token}`, user._id.toString())
-                res.json({token:token})
-                
-
+                const accessToken = createAccessToken(user._id)
+                const refreshToken = await createRefreshToken(user._id)
+                res.json({accessToken,refreshToken })
             }else{
                 res.status(403).json({
                 message:"Invalid credentials"
@@ -75,9 +69,38 @@ userRouter.post("/signin", async (req,res)=>{
     }
 })
 
+userRouter.post("/refresh", async (req,res)=>{
+    try{
+        const refreshToken = req.body.refreshToken
+    if(!refreshToken) {
+        return res.sendStatus(401)
+    }
+
+    const userId = await redisclient.getDel(`refresh:${refreshToken}`)
+    if(!userId){
+        return res.sendStatus(401)
+    }
+
+    const accessToken = createAccessToken(userId)
+    const newrefreshToken = await createRefreshToken(userId)
+    res.json({ accessToken, refreshToken: newrefreshToken })
+    } catch (e){}
+        res.status(500).json({
+            message: "Something went wrong"
+        })
+        console.log(e)
+})
+
+userRouter.post('/logout', async (req, res) => {
+  const  refreshToken  = req.body.refreshToken;
+  if (refreshToken) await redisclient.del(`refresh:${refreshToken}`);
+  res.sendStatus(204);
+})
+
+
 userRouter.get("/preview", authmiddleware,async(req,res)=>{
     try{
-        const userID = req.userID
+        const userID = req.userId
         res.json({userID})
     } catch (e){
         res.status(500).json({message:"Something went wrong"})
@@ -86,7 +109,4 @@ userRouter.get("/preview", authmiddleware,async(req,res)=>{
 })
 
 
-
-module.exports = {
-    userRouter:userRouter
-}
+export { userRouter }

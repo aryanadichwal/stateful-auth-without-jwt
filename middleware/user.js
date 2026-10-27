@@ -1,21 +1,14 @@
-const { redisclient } = require("../config")
-
-
+import jwt from "jsonwebtoken"
 
 async function authmiddleware (req,res,next){
-    const token = req.headers.token
+    const token = req.headers.authorization
     if(!token){
         return res.status(401).json({ message: "No token" })
     }
     try{
-        const userID = await redisclient.get(`session:${token}`)
-        if(!userID){
-            return res.status(401).json({ message: "Session expired or invalid" })
-        }else{
-            req.userID = userID
-            next()
-        }
-        
+        const payload = jwt.verify(token, process.env.JWT_SECRET)
+        req.userId = payload.sub
+        next()
     } catch (e){
         res.status(500).json({message:"Something went wrong"})
         console.log(e)
@@ -24,6 +17,4 @@ async function authmiddleware (req,res,next){
 
 
 
-module.exports = {
-    authmiddleware:authmiddleware
-}
+export { authmiddleware }
